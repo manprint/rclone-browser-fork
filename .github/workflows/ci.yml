@@ -3,6 +3,7 @@ name: Build
 on:
   push:
     branches: [ master, main ]
+    tags: [ 'v*' ]
   pull_request:
   workflow_dispatch:
 
@@ -138,13 +139,68 @@ jobs:
       - name: Bundle with windeployqt
         shell: cmd
         run: |
-          mkdir dist
-          copy build\build\Release\RcloneBrowser.exe dist\
-          windeployqt.exe --no-translations --no-compiler-runtime --release dist\RcloneBrowser.exe
+          mkdir dist\RcloneBrowser
+          copy build\build\Release\RcloneBrowser.exe dist\RcloneBrowser\
+          windeployqt.exe --no-translations --no-compiler-runtime --release dist\RcloneBrowser\RcloneBrowser.exe
+
+      - name: Zip
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force release | Out-Null
+          $v = (Get-Content VERSION).Trim()
+          $sha = (git rev-parse --short HEAD).Trim()
+          Compress-Archive -Path dist\RcloneBrowser\* -DestinationPath "release\rclone-browser-$v-$sha-windows-x64.zip"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: rclone-browser-windows-x64
-          path: dist/**
+          path: release/*.zip
           if-no-files-found: error
+
+  # ----------------------------------------------------------------------------
+  # Publish the built artifacts as GitHub Releases:
+  #   - push to main/master -> rolling "continuous" prerelease (assets updated)
+  #   - push tag v*          -> versioned release with generated notes
+  # IMPORTANT: needs Settings > Actions > General > Workflow permissions set to
+  # "Read and write permissions", otherwise the upload fails with HTTP 403.
+  # ----------------------------------------------------------------------------
+  release:
+    name: Publish release
+    needs: [ macos, linux, windows ]
+    if: >-
+      github.event_name == 'push' &&
+      (github.ref == 'refs/heads/main' ||
+       github.ref == 'refs/heads/master' ||
+       startsWith(github.ref, 'refs/tags/v'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Collect release assets
+        run: |
+          mkdir -p dist
+          find artifacts -type f \( -name '*.dmg' -o -name '*.AppImage' -o -name '*.zip' \) \
+            -exec cp -v {} dist/ \;
+          ls -la dist
+
+      - name: Publish continuous prerelease
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: continuous
+          name: Continuous build
+          prerelease: true
+          files: dist/*
+
+      - name: Publish versioned release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: dist/*
