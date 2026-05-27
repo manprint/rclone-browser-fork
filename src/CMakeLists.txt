@@ -4,9 +4,14 @@ cmake_policy(SET CMP0028 NEW)
 cmake_policy(SET CMP0020 NEW)
 
 if(WIN32)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /W4 /WX /wd4100 /wd4189")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /W4 /WX /wd4100 /wd4189 /wd4996")
 else()
-  add_definitions("-pedantic -Wall -Wextra -Werror -std=c++11")
+  # Keep -Werror, but do not let deprecation warnings fail the build: newer Qt5
+  # (>= 5.14/5.15) deprecates some APIs used here (QString::SplitBehavior,
+  # single-argument QProcess::start) and recent macOS SDKs deprecate the Cocoa
+  # calls in osx_helper.mm. The replacements don't exist on the older Qt versions
+  # still supported, so keep the source as-is and only downgrade these to warnings.
+  add_definitions("-pedantic -Wall -Wextra -Werror -Wno-error=deprecated-declarations -std=c++11")
 endif()
 
 if (APPLE)
@@ -14,9 +19,6 @@ if (APPLE)
   if (NOT CMAKE_OSX_DEPLOYMENT_TARGET)
     set(CMAKE_OSX_DEPLOYMENT_TARGET 11.0)
   endif()
-  # Cocoa ProcessSerialNumber/TransformProcessType in osx_helper.mm are deprecated
-  # on recent SDKs; do not let the deprecation warning fail the build under -Werror.
-  add_definitions("-Wno-error=deprecated-declarations")
 endif()
 
 project(rclone-browser)
