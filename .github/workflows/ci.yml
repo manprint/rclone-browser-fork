@@ -1,0 +1,151 @@
+name: Build
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  # ----------------------------------------------------------------------------
+  # macOS - native build on both Apple Silicon (arm64) and Intel (x86_64).
+  # macos-14 runners are arm64; macos-13 runners are x86_64.
+  # ----------------------------------------------------------------------------
+  macos:
+    name: macOS (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: arm64,  runner: macos-14 }
+          - { arch: x86_64, runner: macos-13 }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install dependencies
+        run: |
+          brew update
+          brew install qt@5 p7zip
+          npm install -g appdmg
+
+      - name: Build, bundle and package (.app / .zip / .dmg)
+        run: bash scripts/release_macOS.sh
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: rclone-browser-macos-${{ matrix.arch }}
+          path: |
+            release/*.dmg
+            release/*.zip
+          if-no-files-found: error
+
+  # ----------------------------------------------------------------------------
+  # Linux - native build on x86_64 and arm64, packaged as AppImage.
+  # ubuntu-24.04-arm runners are native arm64 (no emulation).
+  # ----------------------------------------------------------------------------
+  linux:
+    name: Linux (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x86_64,  runner: ubuntu-22.04,     ldarch: x86_64 }
+          - { arch: aarch64, runner: ubuntu-24.04-arm, ldarch: aarch64 }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git g++ cmake make file wget \
+            qtbase5-dev qtbase5-dev-tools qtdeclarative5-dev \
+            libqt5svg5-dev libgl1-mesa-dev
+
+      - name: Build
+        run: |
+          mkdir build && cd build
+          cmake .. -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_BUILD_TYPE=Release
+          make --jobs=$(nproc)
+          make install DESTDIR=AppDir
+
+      - name: Package AppImage
+        working-directory: build
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+          ARCH: ${{ matrix.ldarch }}
+        run: |
+          BASE="https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous"
+          QTBASE="https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous"
+          wget -q "$BASE/linuxdeploy-${ARCH}.AppImage"
+          wget -q "$QTBASE/linuxdeploy-plugin-qt-${ARCH}.AppImage"
+          chmod +x linuxdeploy-*.AppImage
+          export VERSION="$(cat ../VERSION)-$(git rev-parse --short HEAD)"
+          ./linuxdeploy-${ARCH}.AppImage \
+            --appdir AppDir \
+            --desktop-file AppDir/usr/share/applications/rclone-browser.desktop \
+            --plugin qt \
+            --output appimage
+          mkdir -p ../release
+          mv *.AppImage ../release/ 2>/dev/null || true
+          ls -la ../release
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: rclone-browser-linux-${{ matrix.arch }}
+          path: release/*.AppImage
+          if-no-files-found: error
+
+  # ----------------------------------------------------------------------------
+  # Windows - x64 build, bundled with windeployqt and zipped.
+  # ----------------------------------------------------------------------------
+  windows:
+    name: Windows (x64)
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '5.15.2'
+          host: windows
+          target: desktop
+          arch: win64_msvc2019_64
+
+      - name: Set up MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Build
+        shell: cmd
+        run: |
+          mkdir build
+          cd build
+          cmake -G "Visual Studio 17 2022" -A x64 -DCMAKE_CONFIGURATION_TYPES="Release" -DCMAKE_PREFIX_PATH=%QT_ROOT_DIR% ..
+          cmake --build . --config Release
+
+      - name: Bundle with windeployqt
+        shell: cmd
+        run: |
+          mkdir dist
+          copy build\build\Release\RcloneBrowser.exe dist\
+          windeployqt.exe --no-translations --no-compiler-runtime --release dist\RcloneBrowser.exe
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rclone-browser-windows-x64
+          path: dist/**
+          if-no-files-found: error
