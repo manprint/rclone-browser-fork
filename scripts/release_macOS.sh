@@ -36,9 +36,7 @@ cmake .. -DCMAKE_PREFIX_PATH="$QTDIR" -DCMAKE_BUILD_TYPE=Release
 # brew install coreutils
 make --jobs=$(sysctl -n hw.logicalcpu)
 cd build
-"$QTDIR"/bin/macdeployqt rclone-browser.app -executable="rclone-browser.app/Contents/MacOS/rclone-browser" -qmldir=../src/ -codesign=-
-# Ad-hoc sign whole bundle so Apple Silicon Gatekeeper does not flag it as "damaged".
-codesign --force --deep --sign - --options runtime rclone-browser.app
+"$QTDIR"/bin/macdeployqt rclone-browser.app -executable="rclone-browser.app/Contents/MacOS/rclone-browser" -qmldir=../src/
 cd ../..
 
 
@@ -46,9 +44,11 @@ mkdir -p release
 cd release
 mkdir "$TARGET"
 cp -R "$BUILD"/build/rclone-browser.app "$APP"
-cp "$ROOT"/README.md "$APP"/Readme.md
-cp "$ROOT"/CHANGELOG.md "$APP"/Changelog.md
-cp "$ROOT"/LICENSE "$APP"/License.txt
+# Doc files go alongside the .app, NOT inside the bundle root — loose files in
+# .app/ would make codesign reject the bundle with "unsealed contents present".
+cp "$ROOT"/README.md "$TARGET"/Readme.md
+cp "$ROOT"/CHANGELOG.md "$TARGET"/Changelog.md
+cp "$ROOT"/LICENSE "$TARGET"/License.txt
 mv "$APP"/Contents/MacOS/rclone-browser "$APP"/Contents/MacOS/"Rclone Browser"
 
 sed -i .bak 's/rclone-browser/Rclone Browser/g' "$APP"/Contents/Info.plist
@@ -59,9 +59,12 @@ cat >"$APP"/Contents/MacOS/qt.conf <<EOF
 Plugins = Plugins
 EOF
 
-# Re-sign ad-hoc: bundle modified (binary renamed, Info.plist patched, qt.conf added).
-# Without this, signature is broken and macOS shows "app is damaged".
-codesign --force --deep --sign - --options runtime "$APP"
+# Ad-hoc sign the bundle after all post-macdeployqt modifications (binary rename,
+# Info.plist patch, qt.conf). Apple Silicon requires at least an ad-hoc signature,
+# otherwise Gatekeeper reports the app as "damaged".
+# No --options runtime: hardened runtime without proper entitlements can break Qt.
+codesign --force --deep --sign - "$APP"
+codesign --verify --verbose "$APP"
 
 echo
 echo "Preparing zip file"
