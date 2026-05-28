@@ -84,6 +84,14 @@ Windows installers (64-bit and 32-bit) are compatible with all x86 based Windows
 
 Mac version is compiled to run on all versions of macOS starting with 10.9.
 
+**macOS Gatekeeper note:** the release builds are only **ad-hoc signed** (no paid Apple Developer ID / notarization). When you download the `.dmg` or `.zip` from a browser, macOS adds a `com.apple.quarantine` extended attribute and may show *"Rclone Browser is damaged and can't be opened. You should move it to the Trash."* — especially on Apple Silicon (M1/M2/M3/M4/M5), where the check is stricter. To unblock, after copying the app to `/Applications`, run:
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/Rclone Browser.app"
+```
+
+Alternatively, right-click the app → **Open** (the first time only) to bypass Gatekeeper once.
+
 Situation with Linux is a bit fuzzier...
 Linux binary ([AppImage](https://appimage.org/)) for armhf architecture runs on any Raspberry Pi hardware using Raspbian based on Stretch or Buster.
 

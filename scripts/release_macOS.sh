@@ -36,7 +36,9 @@ cmake .. -DCMAKE_PREFIX_PATH="$QTDIR" -DCMAKE_BUILD_TYPE=Release
 # brew install coreutils
 make --jobs=$(sysctl -n hw.logicalcpu)
 cd build
-"$QTDIR"/bin/macdeployqt rclone-browser.app -executable="rclone-browser.app/Contents/MacOS/rclone-browser" -qmldir=../src/
+"$QTDIR"/bin/macdeployqt rclone-browser.app -executable="rclone-browser.app/Contents/MacOS/rclone-browser" -qmldir=../src/ -codesign=-
+# Ad-hoc sign whole bundle so Apple Silicon Gatekeeper does not flag it as "damaged".
+codesign --force --deep --sign - --options runtime rclone-browser.app
 cd ../..
 
 
@@ -56,6 +58,10 @@ cat >"$APP"/Contents/MacOS/qt.conf <<EOF
 [Paths]
 Plugins = Plugins
 EOF
+
+# Re-sign ad-hoc: bundle modified (binary renamed, Info.plist patched, qt.conf added).
+# Without this, signature is broken and macOS shows "app is damaged".
+codesign --force --deep --sign - --options runtime "$APP"
 
 echo
 echo "Preparing zip file"
